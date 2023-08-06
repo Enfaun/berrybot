@@ -1,0 +1,221 @@
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
+
+import static java.util.Collections.list
+
+plugins {
+    id 'java'
+    id 'idea'
+    id 'org.jetbrains.kotlin.jvm' version '1.8.20'
+    id 'org.jetbrains.kotlin.kapt' version '1.8.20'
+    id 'org.jlleitschuh.gradle.ktlint'  version '10.1.0'
+}
+
+//kotlin {
+//    compileKotlin {
+//        compilerOptions {
+//            freeCompilerArgs.set(['-Xjvm-default=compatibility'])
+//        }
+//    }
+//}
+
+configurations {
+    windows {
+        extendsFrom runtimeClasspath
+    }
+    linux {
+        extendsFrom runtimeClasspath
+    }
+    macos {
+        extendsFrom runtimeClasspath
+    }
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+dependencies {
+    implementation project(":bramble-core")
+    implementation project(":bramble-java")
+    implementation project(":briar-core")
+
+
+    linux "org.briarproject:tor-linux:$tor_version"
+    linux "org.briarproject:obfs4proxy-linux:$obfs4proxy_version"
+    linux "org.briarproject:snowflake-linux:$snowflake_version"
+
+    windows "org.briarproject:tor-windows:$tor_version"
+    windows "org.briarproject:obfs4proxy-windows:$obfs4proxy_version"
+    windows "org.briarproject:snowflake-windows:$snowflake_version"
+
+    macos "org.briarproject:tor-macos:$tor_version"
+    macos "org.briarproject:obfs4proxy-macos:$obfs4proxy_version"
+    macos "org.briarproject:snowflake-macos:$snowflake_version"
+
+    implementation 'org.jdbi:jdbi3-core:3.40.0'
+    implementation 'org.jdbi:jdbi3-sqlite:3.40.0'
+    implementation 'org.jdbi:jdbi3-kotlin-sqlobject:3.40.0'
+    implementation 'org.xerial:sqlite-jdbc:3.42.0.0'
+
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+    implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
+    implementation 'io.javalin:javalin:5.6.2'
+
+
+    implementation 'io.matthewnelson.encoding:base32:2.0.0'
+
+    implementation 'org.slf4j:slf4j-api:2.0.7'
+    implementation 'org.slf4j:jul-to-slf4j:2.0.7'
+    implementation 'ch.qos.logback:logback-core:1.4.8'
+    implementation 'ch.qos.logback:logback-classic:1.4.8'
+
+    implementation 'com.github.ajalt:clikt:2.2.0'
+    implementation "org.bouncycastle:bcprov-jdk15to18:$bouncy_castle_version"
+    implementation "com.squareup.okhttp3:okhttp:$okhttp_version"
+    implementation "com.fasterxml.jackson.core:jackson-databind:$jackson_version"
+    implementation "org.briarproject:onionwrapper-java:$onionwrapper_version"
+
+    kapt "com.google.dagger:dagger-compiler:$dagger_version"
+
+    // im not writing tests for now
+    //testImplementation project(path: ':bramble-api', configuration: 'testOutput')
+    //testImplementation project(path: ':bramble-core', configuration: 'testOutput')
+    //testImplementation project(path: ':briar-core', configuration: 'testOutput')
+
+    //def junitVersion = '5.5.2'
+    //testImplementation "org.junit.jupiter:junit-jupiter-api:$junitVersion"
+    //testImplementation "org.junit.jupiter:junit-jupiter-params:$junitVersion"
+    //testImplementation 'io.mockk:mockk:1.12.4'
+    //testImplementation 'org.skyscreamer:jsonassert:1.5.0'
+    //testImplementation "com.squareup.okhttp3:okhttp:4.10.0"
+
+    //testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:$junitVersion"
+
+    //kaptTest "com.google.dagger:dagger-compiler:$dagger_version"
+}
+
+
+void jarFactory(Jar jarTask, os, architecture, configuration) {
+    def jarArchitecture = os + "-" + architecture
+    jarTask.dependsOn(
+            ':bramble-api:jar',
+            ':bramble-core:jar',
+            ':bramble-java:jar',
+            ':briar-api:jar',
+            ':briar-core:jar'
+    )
+    jarTask.dependsOn(jar)
+    jarTask.doFirst {
+        println 'Building ' + jarArchitecture + ' version has started'
+    }
+    jarTask.manifest {
+        attributes(
+                'Main-Class': 'net.enfau.berry.MainKt'
+        )
+    }
+    jarTask.setArchiveClassifier(jarArchitecture)
+    jarTask.from {
+        configuration.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+            {
+                it.duplicatesStrategy(DuplicatesStrategy.EXCLUDE)
+                if (os == "linux" || os == "macos") {
+                    String[] architectures = [
+                            "aarch64",
+                            "armhf",
+                            "x86_64",
+                    ]
+                    for (String arch : architectures) {
+                        if (arch != architecture) {
+                            exclude arch + "/obfs4proxy"
+                            exclude arch + "/tor"
+                            exclude arch + "/snowflake"
+                            exclude arch + "/libevent-*.dylib"
+                        }
+                    }
+                }
+                exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+            }
+    jarTask.with jar
+    jarTask.doLast {
+        // Rename the original jar
+        File jar = jarTask.archiveFile.get().asFile
+        String srcPath = jar.toString().replaceFirst('\\.jar$', '.unsorted.jar')
+        File srcFile = new File(srcPath)
+        jar.renameTo(srcFile)
+        JarFile srcJarFile = new JarFile(srcFile)
+        OutputStream destStream = new JarOutputStream(new FileOutputStream(jar))
+        // Read and sort the entries
+        Map<String, JarEntry> entries = new TreeMap<>()
+        for (JarEntry e : list(srcJarFile.entries())) entries.put(e.getName(), e)
+        // Write the sorted entries
+        for (JarEntry srcEntry : entries.values()) {
+            JarEntry destEntry = new JarEntry(srcEntry.getName())
+            destEntry.setTime(0)
+            destStream.putNextEntry(destEntry)
+            InputStream srcStream = srcJarFile.getInputStream(srcEntry)
+            int read
+            byte[] buf = new byte[4096]
+            while ((read = srcStream.read(buf, 0, buf.length)) != -1) {
+                destStream.write(buf, 0, read)
+            }
+            destStream.closeEntry()
+            srcStream.close()
+        }
+        destStream.close()
+        srcJarFile.close()
+        println 'Building ' + jarArchitecture + ' version has finished'
+    }
+}
+
+tasks.register('aarch64LinuxJar', Jar) {
+    jarFactory(it, 'linux', 'aarch64', configurations.linux)
+}
+
+tasks.register('armhfLinuxJar', Jar) {
+    jarFactory(it, 'linux', 'armhf', configurations.linux)
+}
+
+tasks.register('x86LinuxJar', Jar) {
+    jarFactory(it, 'linux', 'x86_64', configurations.linux)
+}
+
+tasks.register('windowsJar', Jar) {
+    jarFactory(it, 'windows', 'x86_64', configurations.windows)
+}
+
+tasks.register('aarch64MacOsJar', Jar) {
+    jarFactory(it, 'macos', 'aarch64', configurations.macos)
+}
+
+tasks.register('x86MacOsJar', Jar) {
+    jarFactory(it, 'macos', 'x86_64', configurations.macos)
+}
+
+tasks.register('linuxJars') {
+    dependsOn(aarch64LinuxJar, armhfLinuxJar, x86LinuxJar)
+}
+
+tasks.register('macosJars') {
+    dependsOn(aarch64MacOsJar, x86MacOsJar)
+}
+
+
+// At the moment for non-Android projects we need to explicitly mark the code generated by kapt
+// as 'generated source code' for correct highlighting and resolve in IDE.
+//idea {
+//    module {
+//        sourceDirs += file('build/generated/source/kapt/main')
+//        testSourceDirs += file('build/generated/source/kapt/test')
+//        generatedSourceDirs += file('build/generated/source/kapt/main')
+//    }
+//}
+
+// im not writing tests for now
+//test {
+//	useJUnitPlatform()
+//	testLogging {
+//		events "passed", "skipped", "failed"
+//	}
+//}

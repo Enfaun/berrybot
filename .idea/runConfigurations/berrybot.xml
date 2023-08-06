@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="berrybot" type="JetRunConfigurationType" singleton="true">
+    <envs>
+      <env name="DEW_BOT_NAME" value="BerryBot (test)" />
+      <env name="DEW_BOT_PASSWORD" value="" />
+      <env name="DEW_WEB_TOKEN" value="" />
+    </envs>
+    <option name="MAIN_CLASS_NAME" value="net.enfau.berry.MainKt" />
+    <module name="dewberry.berrybot.main" />
+    <option name="PROGRAM_PARAMETERS" value="-d" />
+    <shortenClasspath name="NONE" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
